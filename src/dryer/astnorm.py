@@ -209,10 +209,45 @@ def _callee_leaf(node):
     return _PENDING
 
 
+_R_ASSIGNMENT_OPERATORS = {"<-", "<<-", "="}
+
+
+def _fills(node, field: str) -> bool:
+    """True when `node` is the `field` child of its parent."""
+
+    parent = node.parent
+    if parent is None:
+        return False
+    held = parent.child_by_field_name(field)
+    return held is not None and held.id == node.id
+
+
+def _is_r_quoted_name(node) -> bool:
+    """An R name written as a string: `"f" <- function(...)` or `round(x, "digits" = 2)`.
+
+    R reads both exactly as it reads the unquoted name, so the string is a
+    name here and not a value.
+    """
+
+    if _LANGUAGE != "r" or node.type != "string":
+        return False
+    parent = node.parent
+    if parent is None:
+        return False
+    if parent.type == "argument":
+        return _fills(node, "name")
+    if parent.type != "binary_operator" or not _fills(node, "lhs"):
+        return False
+    operator = parent.child_by_field_name("operator")
+    return operator is not None and operator.type in _R_ASSIGNMENT_OPERATORS
+
+
 def _named_leaf(node, head: bool):
     if node.type in _IDENTIFIERS:
         if head:
             return [K("symbol"), _text(node)]
+        return K("symbol")
+    if _is_r_quoted_name(node):
         return K("symbol")
     if _is_literal(node):
         return K("literal")

@@ -168,3 +168,12 @@ def test_a_function_given_a_quoted_name_is_compared():
     source = '"quoted" <- function(x) {\n  x + 1\n}\n`back tick` <- function(x) {\n  x + 1\n}\n'
     entries, _warning = entries_in_source("r", source, "a.R", "a.R")
     assert [(entry.start_line, entry.end_line) for entry in entries] == [(1, 3), (4, 6)]
+
+
+def test_a_quoted_name_is_a_name_not_a_literal():
+    plain = "f <- function(x) {\n  round(x, digits = 2)\n}\n"
+    quoted = '"g" <- function(y) {\n  round(y, "digits" = 3)\n}\n'
+    assert score(plain, quoted) == 1.0
+    # A string that is a value is still a literal.
+    assert score(plain, "f <- function(x) {\n  round(x, digits = 'a')\n}\n") == 1.0
+    assert score(plain, "f <- function(x) {\n  round('x', digits = 2)\n}\n") < 1.0
