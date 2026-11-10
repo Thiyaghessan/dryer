@@ -3,7 +3,9 @@
 Clojure compares every top-level list except `ns`, matching dry4clj. The other
 languages compare the functions and methods crapper scores: bodies, not
 signatures alone, and not callbacks nested inside another function. Rust
-functions inside `mod tests` are test code and are skipped.
+functions inside `mod tests` are test code and are skipped. An R function is
+compared when it is assigned to a name with `<-`, `=`, or `<<-` outside any
+other function.
 """
 
 from __future__ import annotations
@@ -143,12 +145,39 @@ def _rust_nodes(data: bytes, root) -> list:
     return found
 
 
+_R_ASSIGNMENTS = {"<-", "=", "<<-"}
+
+
+def _r_named_function(node) -> bool:
+    """True for `name <- function(...)`, with `=` or `<<-` as well."""
+
+    if node.type != "binary_operator":
+        return False
+    operator = node.child_by_field_name("operator")
+    name = node.child_by_field_name("lhs")
+    function = node.child_by_field_name("rhs")
+    if operator is None or operator.type not in _R_ASSIGNMENTS:
+        return False
+    if name is None or name.type not in {"identifier", "string"}:
+        return False
+    return function is not None and function.type == "function_definition"
+
+
+def _r_nodes(data: bytes, root) -> list:
+    found = []
+    for node in descendants(root):
+        if _r_named_function(node) and not _inside(node, {"function_definition"}):
+            found.append(node)
+    return found
+
+
 _PICKERS = {
     "java": ("java", _java_nodes),
     "go": ("go", _go_nodes),
     "python": ("python", _python_nodes),
     "typescript": (_grammar, _typescript_nodes),
     "rust": ("rust", _rust_nodes),
+    "r": ("r", _r_nodes),
 }
 
 
@@ -158,7 +187,7 @@ def _tree_entries(language: str, source: str, path: str, file: str) -> list[Entr
     data, tree = parse(source, grammar)
     entries = []
     for node in pick(data, tree.root_node):
-        normalized = normalize(node, data)
+        normalized = normalize(node, data, language)
         if normalized is None:
             continue
         entries.append(

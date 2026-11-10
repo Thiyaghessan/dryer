@@ -21,6 +21,8 @@ EXTENSIONS = {
     ".cts": "typescript",
     ".rs": "rust",
     ".py": "python",
+    ".R": "r",
+    ".r": "r",
 }
 
 SKIP_DIRS = {
@@ -77,6 +79,8 @@ def is_test_file(path: str | Path) -> bool:
     if name == "conftest.py":
         return True
     if name.endswith("_test.py") or (name.startswith("test_") and name.endswith(".py")):
+        return True
+    if name.startswith(("test_", "test-")) and name.endswith((".R", ".r")):
         return True
     return any(part in TEST_DIRS for part in file_path.parts)
 

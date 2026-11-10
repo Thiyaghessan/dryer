@@ -1,6 +1,6 @@
 # dryer
 
-dryer finds candidate duplicate code in Clojure, Java, Go, TypeScript, Rust, and Python. One run detects the language of each source file, normalizes that language's forms, and reports pairs whose structure is close enough to review.
+dryer finds candidate duplicate code in Clojure, Java, Go, TypeScript, Rust, Python, and R. One run detects the language of each source file, normalizes that language's forms, and reports pairs whose structure is close enough to review.
 
 Clojure follows [dry4clj](https://github.com/unclebob/dry4clj). The other languages use the same idea on the functions and methods [crapper](https://github.com/unclebob/crapper) and [mutator](https://github.com/unclebob/mutator) already treat as one unit. A form is only compared with forms written in the same language.
 
@@ -101,6 +101,9 @@ DUPLICATE score=0.89
 | TypeScript | functions, methods, and top-level arrow functions | callbacks nested inside another function |
 | Rust | functions and methods with a body | functions inside `mod tests`, and closures |
 | Python | functions and methods | functions nested inside another function |
+| R | functions assigned to a name with `<-`, `=`, or `<<-` | functions nested inside another function, and functions passed as arguments |
+
+R is normalized the same way as the other languages. The name of a called function stays, with its package when one is written (`dplyr::filter`), and so does each operator, including `%in%`, `%>%`, `|>`, and `<-`. `p::g` and `p:::g` are different, and so are `x$a` and `x@a`. A statement `x = 1` is treated as `x <- 1`. Local names become one marker and every literal (numbers, strings, `TRUE`, `NULL`, `NA`) becomes another.
 
 Clojure reader conditionals keep the `:clj` branch, as dry4clj does. Syntax-quote is kept as a `syntax-quote` form rather than expanded.
 

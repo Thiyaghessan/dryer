@@ -1,7 +1,7 @@
 """Normalize a tree-sitter tree the way dry4clj normalizes a Clojure form.
 
 The name in call position stays: `filter`, `Println`, `map`, an operator, the
-type constructed by `new`. Local names, field names, type names in argument
+type constructed by `new`, and in R the package in front (`dplyr::filter`). Local names, field names, type names in argument
 position, and literals become generic markers. Two functions that call the
 same operations in the same shape therefore share a fingerprint set even when
 their locals differ.
@@ -18,6 +18,8 @@ _SKIP = {
     "block_comment",
     "documentation_comment",
     "doc_comment",
+    # R makes the comma between arguments a named node. It is punctuation.
+    "comma",
 }
 
 _IDENTIFIERS = {
@@ -62,6 +64,11 @@ _LITERALS = {
     "template_string",
     "regex",
     "regex_literal",
+    # R: NA, Inf, NaN, and imaginary numbers such as 3i.
+    "na",
+    "inf",
+    "nan",
+    "complex",
 }
 
 _OPERATORS = {
@@ -127,24 +134,42 @@ _ATTRIBUTES = {
     "selector_expression",
     "field_access",
     "field_expression",
+    # R: x$name
+    "extract_operator",
 }
 
 _SCOPED = {
     "scoped_identifier",
     "scoped_type_identifier",
+    # R: package::name
+    "namespace_operator",
 }
+
+# R writes assignment, the pipe, and a range with tokens that are plain
+# punctuation in the other languages (`->` before a return type, `:` after
+# `if`), so these count as operators only when the source is R.
+_R_OPERATORS = {"<-", "<<-", "->", "->>", "|>", ":"}
+# How R reaches a name inside something else. `p::g` is exported by the
+# package and `p:::g` is not. `x$a` is a member of a list and `x@a` is a slot
+# of an S4 object. Each pair is a different operation, so the token stays.
+_R_ACCESS_OPERATORS = {"::", ":::", "$", "@"}
+# R's user-defined operators, such as %in% and %>%, share one token type.
+# The spelling between the percent signs is the operator's name.
+_R_CUSTOM_OPERATOR = "special"
 
 _ARG_LISTS = {"argument_list", "arguments"}
 _TYPE_ARGS = {"type_arguments", "type_parameters"}
 
 _DATA: bytes = b""
+_LANGUAGE: str = ""
 
 
-def normalize(node, data: bytes):
+def normalize(node, data: bytes, language: str = ""):
     """Normalized tree for `node`, or None when the node is only punctuation."""
 
-    global _DATA
+    global _DATA, _LANGUAGE
     _DATA = data
+    _LANGUAGE = language
     return _normalize(node)
 
 
@@ -184,14 +209,75 @@ def _callee_leaf(node):
     return _PENDING
 
 
+_R_ASSIGNMENT_OPERATORS = {"<-", "<<-", "="}
+
+
+def _fills(node, field: str) -> bool:
+    """True when `node` is the `field` child of its parent."""
+
+    parent = node.parent
+    if parent is None:
+        return False
+    held = parent.child_by_field_name(field)
+    return held is not None and held.id == node.id
+
+
+def _is_r_quoted_name(node) -> bool:
+    """An R name written as a string: `"f" <- function(...)` or `round(x, "digits" = 2)`.
+
+    R reads both exactly as it reads the unquoted name, so the string is a
+    name here and not a value.
+    """
+
+    if _LANGUAGE != "r" or node.type != "string":
+        return False
+    parent = node.parent
+    if parent is None:
+        return False
+    if parent.type == "argument":
+        return _fills(node, "name")
+    if parent.type != "binary_operator" or not _fills(node, "lhs"):
+        return False
+    operator = parent.child_by_field_name("operator")
+    return operator is not None and operator.type in _R_ASSIGNMENT_OPERATORS
+
+
 def _named_leaf(node, head: bool):
     if node.type in _IDENTIFIERS:
         if head:
             return [K("symbol"), _text(node)]
         return K("symbol")
+    if _is_r_quoted_name(node):
+        return K("symbol")
     if _is_literal(node):
         return K("literal")
     return _PENDING
+
+
+def _is_r_equals_assignment(node) -> bool:
+    """`x = 1` as a statement, which R treats exactly as `x <- 1`.
+
+    The `=` of a named argument (`f(digits = 2)`) or of a default value sits
+    under an argument or a parameter, not under an operator, and stays `=`.
+    """
+
+    return node.type == "=" and node.parent is not None and node.parent.type == "binary_operator"
+
+
+def _operator_spelling(node) -> str | None:
+    """How an operator token is written, or None when the node is not an operator."""
+
+    if _LANGUAGE == "r" and _is_r_equals_assignment(node):
+        return "<-"
+    if node.type in _OPERATORS:
+        return node.type
+    if _LANGUAGE != "r":
+        return None
+    if node.type in _R_OPERATORS or node.type in _R_ACCESS_OPERATORS:
+        return node.type
+    if node.type == _R_CUSTOM_OPERATOR:
+        return _text(node)
+    return None
 
 
 def _try_leaf(node, mode: str, head: bool):
@@ -201,8 +287,9 @@ def _try_leaf(node, mode: str, head: bool):
         return _PENDING
     if node.type in _SKIP:
         return None
-    if node.type in _OPERATORS:
-        return [K("symbol"), node.type]
+    operator = _operator_spelling(node)
+    if operator is not None:
+        return [K("symbol"), operator]
     if not node.is_named:
         return None
     return _named_leaf(node, head)
@@ -305,12 +392,27 @@ def _assemble_call(node, cache):
     return out
 
 
+def _access_operator(node) -> list:
+    """The R token between the two names of `p::g` or `x$a`, as a one-item list.
+
+    Empty for every other language, whose member and path nodes are told
+    apart by their node type alone.
+    """
+
+    if _LANGUAGE != "r":
+        return []
+    operator = node.child_by_field_name("operator")
+    if operator is None or operator.type not in _R_ACCESS_OPERATORS:
+        return []
+    return [[K("symbol"), operator.type]]
+
+
 def _assemble_attr(node, head: bool, cache):
     named = list(node.named_children)
     if not named:
         return [K(node.type)]
     *objects, name = named
-    parts = [K(node.type)]
+    parts = [K(node.type), *_access_operator(node)]
     for obj in objects:
         norm = cache[(id(obj), "norm", False)]
         if norm is not None:
@@ -324,7 +426,7 @@ def _assemble_attr(node, head: bool, cache):
 def _assemble_path(node, cache):
     """A callee path keeps each name in the path. Type arguments stay structural."""
 
-    parts = [K(node.type)]
+    parts = [K(node.type), *_access_operator(node)]
     for child in node.named_children:
         if child.type in _IDENTIFIERS:
             parts.append([K("symbol"), _text(child)])
