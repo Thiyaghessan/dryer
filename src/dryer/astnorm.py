@@ -149,6 +149,10 @@ _SCOPED = {
 # punctuation in the other languages (`->` before a return type, `:` after
 # `if`), so these count as operators only when the source is R.
 _R_OPERATORS = {"<-", "<<-", "->", "->>", "|>", ":"}
+# How R reaches a name inside something else. `p::g` is exported by the
+# package and `p:::g` is not. `x$a` is a member of a list and `x@a` is a slot
+# of an S4 object. Each pair is a different operation, so the token stays.
+_R_ACCESS_OPERATORS = {"::", ":::", "$", "@"}
 # R's user-defined operators, such as %in% and %>%, share one token type.
 # The spelling between the percent signs is the operator's name.
 _R_CUSTOM_OPERATOR = "special"
@@ -234,7 +238,7 @@ def _operator_spelling(node) -> str | None:
         return node.type
     if _LANGUAGE != "r":
         return None
-    if node.type in _R_OPERATORS:
+    if node.type in _R_OPERATORS or node.type in _R_ACCESS_OPERATORS:
         return node.type
     if node.type == _R_CUSTOM_OPERATOR:
         return _text(node)
@@ -353,12 +357,27 @@ def _assemble_call(node, cache):
     return out
 
 
+def _access_operator(node) -> list:
+    """The R token between the two names of `p::g` or `x$a`, as a one-item list.
+
+    Empty for every other language, whose member and path nodes are told
+    apart by their node type alone.
+    """
+
+    if _LANGUAGE != "r":
+        return []
+    operator = node.child_by_field_name("operator")
+    if operator is None or operator.type not in _R_ACCESS_OPERATORS:
+        return []
+    return [[K("symbol"), operator.type]]
+
+
 def _assemble_attr(node, head: bool, cache):
     named = list(node.named_children)
     if not named:
         return [K(node.type)]
     *objects, name = named
-    parts = [K(node.type)]
+    parts = [K(node.type), *_access_operator(node)]
     for obj in objects:
         norm = cache[(id(obj), "norm", False)]
         if norm is not None:
@@ -372,7 +391,7 @@ def _assemble_attr(node, head: bool, cache):
 def _assemble_path(node, cache):
     """A callee path keeps each name in the path. Type arguments stay structural."""
 
-    parts = [K(node.type)]
+    parts = [K(node.type), *_access_operator(node)]
     for child in node.named_children:
         if child.type in _IDENTIFIERS:
             parts.append([K("symbol"), _text(child)])

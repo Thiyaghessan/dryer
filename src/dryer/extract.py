@@ -158,7 +158,7 @@ def _r_named_function(node) -> bool:
     function = node.child_by_field_name("rhs")
     if operator is None or operator.type not in _R_ASSIGNMENTS:
         return False
-    if name is None or name.type != "identifier":
+    if name is None or name.type not in {"identifier", "string"}:
         return False
     return function is not None and function.type == "function_definition"
 

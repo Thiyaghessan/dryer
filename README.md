@@ -103,7 +103,7 @@ DUPLICATE score=0.89
 | Python | functions and methods | functions nested inside another function |
 | R | functions assigned to a name with `<-`, `=`, or `<<-` | functions nested inside another function, and functions passed as arguments |
 
-R is normalized the same way as the other languages. The name of a called function stays, with its package when one is written (`dplyr::filter`), and so does each operator, including `%in%`, `%>%`, `|>`, and `<-`. A statement `x = 1` is treated as `x <- 1`. Local names become one marker and every literal (numbers, strings, `TRUE`, `NULL`, `NA`) becomes another.
+R is normalized the same way as the other languages. The name of a called function stays, with its package when one is written (`dplyr::filter`), and so does each operator, including `%in%`, `%>%`, `|>`, and `<-`. `p::g` and `p:::g` are different, and so are `x$a` and `x@a`. A statement `x = 1` is treated as `x <- 1`. Local names become one marker and every literal (numbers, strings, `TRUE`, `NULL`, `NA`) becomes another.
 
 Clojure reader conditionals keep the `:clj` branch, as dry4clj does. Syntax-quote is kept as a `syntax-quote` form rather than expanded.
 

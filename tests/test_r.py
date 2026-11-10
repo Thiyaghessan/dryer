@@ -147,3 +147,24 @@ def test_equals_assignment_is_the_same_as_arrow_assignment():
     named = "f <- function(x) {\n  round(digits = x)\n}\n"
     assigned = "f <- function(x) {\n  round(digits <- x)\n}\n"
     assert score(named, assigned) < 1.0
+
+
+def test_how_a_name_is_reached_is_part_of_the_shape():
+    exported = "f <- function(x) {\n  p::g(x)\n}\n"
+    assert score(exported, "h <- function(y) {\n  p::g(y)\n}\n") == 1.0
+    # `:::` reaches a function the package does not export.
+    assert score(exported, "h <- function(y) {\n  p:::g(y)\n}\n") < 1.0
+    # The same holds when the name is read, not called.
+    assert score("f <- function() {\n  p::g\n}\n", "h <- function() {\n  p:::g\n}\n") < 1.0
+
+    list_member = "f <- function(x) {\n  x$a\n}\n"
+    assert score(list_member, "h <- function(y) {\n  y$b\n}\n") == 1.0
+    # `@` reads a slot of an S4 object, `$` a member of a list.
+    assert score(list_member, "h <- function(y) {\n  y@b\n}\n") < 1.0
+    assert score("f <- function(x) {\n  x$run()\n}\n", "h <- function(y) {\n  y@run()\n}\n") < 1.0
+
+
+def test_a_function_given_a_quoted_name_is_compared():
+    source = '"quoted" <- function(x) {\n  x + 1\n}\n`back tick` <- function(x) {\n  x + 1\n}\n'
+    entries, _warning = entries_in_source("r", source, "a.R", "a.R")
+    assert [(entry.start_line, entry.end_line) for entry in entries] == [(1, 3), (4, 6)]
